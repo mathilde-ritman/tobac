@@ -18,7 +18,7 @@ import joblib
 import logging
 
 
-def get_multivariate_label_maps(child_mask, child_tracks, parent_mask, parent_tracks):
+def get_multivariate_label_maps(child_mask, child_tracks, parent_mask, parent_tracks, name="multivariate"):
     """Find label mappings from child to parent features where they overlap, then store them in the track tables.
 
     Parameters
@@ -34,6 +34,9 @@ def get_multivariate_label_maps(child_mask, child_tracks, parent_mask, parent_tr
 
     parent_tracks : pandas.DataFrame
         DataFrame containing the corresponding labels and tracking details of the tracked parent features.
+
+    name : str, optional
+        Name of the new label column to create in the track tables. Default is "multivariate".
 
     Returns
     -------
@@ -120,13 +123,13 @@ def get_multivariate_label_maps(child_mask, child_tracks, parent_mask, parent_tr
         all_child_values, all_child_mappings, NAN_VAL
     )
 
-    child_tracks["multivariate"] = (
+    child_tracks[name] = (
         child_tracks[child_name].map(final_child_mappings).fillna(0).astype(int)
     )  # record mapping as new dataframe column
 
     # sometimes a child actually had multiple parents (e.g., it's parent at time 0 is different to at time 1), in these cases, we record only one parent for the child, and those parents that got left out are recorded here:
 
-    parent_tracks["multivariate"] = (
+    parent_tracks[name] = (
         parent_tracks[parent_name].map(resulting_parent_mappings).fillna(0).astype(int)
     )
 
@@ -192,7 +195,7 @@ def drop_repeated_mappings(list_A, list_B, nan_val):
     return valid_maps(a_mappings), valid_maps(b_mappings)
 
 
-def apply_multivariate_label_maps(child_mask, child_tracks, parent_mask, parent_tracks):
+def apply_multivariate_label_maps(child_mask, child_tracks, parent_mask=None, parent_tracks=None, name="multivariate"):
     """Relabel child and parent masks using the mappings stored in the track tables.
 
     Parameters
@@ -209,6 +212,9 @@ def apply_multivariate_label_maps(child_mask, child_tracks, parent_mask, parent_
     parent_tracks : pandas.DataFrame
         DataFrame containing mappings from duplicate parent labels to final parent labels.
 
+    name : str, optional
+        Name of the new label column to create in the track tables. Default is "multivariate".
+
     Returns
     -------
     child_mask_out : xarray.DataArray
@@ -220,13 +226,10 @@ def apply_multivariate_label_maps(child_mask, child_tracks, parent_mask, parent_
     """
 
     child_name = child_mask.name
-    parent_name = parent_mask.name
-
-    child_darray = dask.array.from_array(child_mask.fillna(0))
-    parent_darray = dask.array.from_array(parent_mask.fillna(0))
+    child_darray = dask.array.from_array(child_mask.where(child_mask > 0).fillna(0))
 
     def _map_child(vals):
-        map_as_dict = child_tracks.set_index(child_name)["multivariate"].to_dict()
+        map_as_dict = child_tracks.set_index(child_name)[name].to_dict()
         map_as_array = np.full(child_tracks[child_name].max() + 1, 0, dtype=np.int64)
         for k, v in map_as_dict.items():
             map_as_array[k] = v
@@ -236,10 +239,16 @@ def apply_multivariate_label_maps(child_mask, child_tracks, parent_mask, parent_
         child_darray.map_blocks(_map_child, dtype=np.int64),
         dims=child_mask.dims,
         coords=child_mask.coords,
-    ).rename("multivariate")
+    ).rename(name)
+
+    if parent_mask is None or parent_tracks is None:
+        return child_mapped
+    
+    parent_name = parent_mask.name
+    parent_darray = dask.array.from_array(parent_mask.where(parent_mask > 0).fillna(0))
 
     def _map_parent(vals):
-        map_as_dict = parent_tracks.set_index(parent_name)["multivariate"].to_dict()
+        map_as_dict = parent_tracks.set_index(parent_name)[name].to_dict()
         map_as_array = np.full(parent_tracks[parent_name].max() + 1, 0, dtype=np.int64)
         for k, v in map_as_dict.items():
             map_as_array[k] = v
@@ -249,6 +258,6 @@ def apply_multivariate_label_maps(child_mask, child_tracks, parent_mask, parent_
         parent_darray.map_blocks(_map_parent, dtype=np.int64),
         dims=parent_mask.dims,
         coords=parent_mask.coords,
-    ).rename("multivariate")
+    ).rename(name)
 
     return child_mapped, parent_mapped

@@ -22,7 +22,7 @@ import joblib
 import itertools
 
 
-def track_using_contiguity(mask, table, PBC_flag=None, vdim=None, dims_to_skip=()):
+def track_using_contiguity(mask, table, PBC_flag=None, vdim=None, dims_to_skip=(), name="contiguity"):
     """Perform tracking by testing for contiguity between features.
 
     Parameters
@@ -41,6 +41,9 @@ def track_using_contiguity(mask, table, PBC_flag=None, vdim=None, dims_to_skip=(
 
     dims_to_skip : tuple of ints
         Dimension numbers to treat as independent when testing for contiguity, i.e., labels are not shared between these dimensions.
+
+    name : str
+        Name of the new column to be added to the tracking table.
 
     Returns
     -------
@@ -121,12 +124,12 @@ def track_using_contiguity(mask, table, PBC_flag=None, vdim=None, dims_to_skip=(
         df_t = pd.DataFrame(
             {
                 mask.name: m.where(m>0).values.ravel(),
-                "contiguous": r.where(r>0).values.ravel(),
+                name: r.where(r>0).values.ravel(),
             }
         ).dropna()
         pairs.update(map(tuple, df_t.to_numpy()))
 
-    df = pd.DataFrame(sorted(pairs), columns=[mask.name, "contiguous"]).astype(int)
+    df = pd.DataFrame(sorted(pairs), columns=[mask.name, name]).astype(int)
 
     # add to tracking table
     tracked_table = table.merge(
@@ -134,6 +137,8 @@ def track_using_contiguity(mask, table, PBC_flag=None, vdim=None, dims_to_skip=(
         on=mask.name,
         how="left",
     )
+
+    tracked_mask.name = name    
 
     logging.info("Completed creating tracking table")
 
@@ -194,6 +199,7 @@ def track_using_eroded_contiguity(
     vdim=None,
     max_object_length=1,
     use_parallel=True,
+    name="econtiguity"
 ):
     """Perform tracking by eroding the input mask by the given fraction before testing for contiguity between timesteps.
 
@@ -220,6 +226,9 @@ def track_using_eroded_contiguity(
     use_parallel : bool
         Whether to use parallel processing.
 
+    name : str
+        Name of the new column to be added to the tracking table.
+
     Returns
     ----------
     table : pandas.DataFrame
@@ -228,9 +237,9 @@ def track_using_eroded_contiguity(
     """
 
     eroded_mask = erode_mask(mask, fraction, PBC_flag, vdim, max_object_length, use_parallel)
-    tracked_eroded_mask, tracked_table = track_using_contiguity(eroded_mask, table, PBC_flag, vdim)
+    tracked_eroded_mask, _ = track_using_contiguity(eroded_mask, table, PBC_flag, vdim, name=name)
 
-    return tracked_table
+    return tracked_eroded_mask
 
 
 def erode_mask(mask, fraction, PBC_flag=None, vdim=None, max_object_length=1, use_parallel=True):
